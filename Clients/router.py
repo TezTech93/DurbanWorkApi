@@ -14,6 +14,16 @@ async def register_client(client_data: ClientCreate):
         result = client_manager.add_client(client_data)
         if "error" in result:
             raise HTTPException(status_code=400, detail=result["error"])
+        
+        # Add token and format for frontend
+        if "client" in result:
+            result["client"]["token"] = f"client-token-{result['client']['id']}"
+            return {
+                "data": result["client"],  # ✅ Frontend expects response.data
+                "success": True,
+                "message": result.get("message", "Client registered successfully")
+            }
+        
         return result
     except Exception as e:
         logger.error(f"Client registration error: {e}")
