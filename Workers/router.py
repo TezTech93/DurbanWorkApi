@@ -14,11 +14,21 @@ async def register_worker(worker_data: WorkerCreate):
         result = worker_manager.add_worker(worker_data)
         if "error" in result:
             raise HTTPException(status_code=400, detail=result["error"])
+        
+        # Add token and format for frontend
+        if "worker" in result:
+            result["worker"]["token"] = f"worker-token-{result['worker']['id']}"
+            return {
+                "data": result["worker"],  # ✅ Frontend expects response.data
+                "success": True,
+                "message": result.get("message", "Worker registered successfully")
+            }
+        
         return result
     except Exception as e:
         logger.error(f"Registration error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
+        
 @router.post("/login", response_model=dict)
 async def login_worker(login_data: WorkerLogin):
     """Login a worker"""
