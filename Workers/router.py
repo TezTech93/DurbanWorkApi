@@ -26,11 +26,19 @@ async def login_worker(login_data: WorkerLogin):
         worker = worker_manager.authenticate_worker(login_data.email, login_data.password)
         if not worker:
             raise HTTPException(status_code=401, detail="Invalid credentials")
-        return {"success": True, "worker": worker, "message": "Login successful"}
+        
+        # Add token for frontend
+        worker['token'] = f"worker-token-{worker['id']}"
+        
+        # Match frontend expectation
+        return {
+            "data": worker,  # ✅ Frontend expects response.data
+            "success": True,
+            "message": "Login successful"
+        }
     except Exception as e:
         logger.error(f"Login error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
 @router.get("/", response_model=List[WorkerResponse])
 async def get_all_workers(
     available_only: bool = True,
