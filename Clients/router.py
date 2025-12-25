@@ -26,7 +26,16 @@ async def login_client(login_data: ClientLogin):
         client = client_manager.authenticate_client(login_data.email, login_data.password)
         if not client:
             raise HTTPException(status_code=401, detail="Invalid credentials")
-        return {"success": True, "client": client, "message": "Login successful"}
+        
+        # Add token for frontend
+        client['token'] = f"client-token-{client['id']}"
+        
+        # Match frontend expectation
+        return {
+            "data": client,  # ✅ Frontend expects response.data
+            "success": True,
+            "message": "Login successful"
+        }
     except Exception as e:
         logger.error(f"Client login error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
