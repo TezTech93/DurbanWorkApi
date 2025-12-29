@@ -286,35 +286,36 @@ class WorkerManager:
     
     def authenticate_worker(self, email: str, password: str) -> Optional[Dict]:
         """Authenticate worker"""
-        conn = None  # <--- MUST initialize to None here
+        conn = None  # Initialize to None to prevent UnboundLocalError
         try:
+            # First get worker data without password hash
             worker = self.get_worker_by_email(email)
             if not worker:
                 return None
             
-            # Now define the connection
+            # Get the password hash from database
             conn = self.get_connection()
             cur = conn.cursor()
             cur.execute("SELECT password_hash FROM workers WHERE email = ?", (email,))
             result = cur.fetchone()
             
-            if not result or not self.verify_password(password, result['password_hash']):
+            if not result:
                 return None
             
-            # Remove password hash from response
-            if 'password_hash' in worker:
-                del worker['password_hash']
+            # Verify password
+            if not self.verify_password(password, result['password_hash']):
+                return None
             
+            # Return worker data (password hash already removed by _row_to_dict)
             return worker
             
         except Exception as e:
             logger.error(f"Authentication error: {e}")
             return None
         finally:
-            # This check prevents the 'UnboundLocalError'
+            # Safely close connection if it was opened
             if conn:
                 conn.close()
-
     
     def get_all_workers(self, available_only: bool = True, limit: int = 50, offset: int = 0) -> List[Dict]:
         """Get all workers with optional filters"""
