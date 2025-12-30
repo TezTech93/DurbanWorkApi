@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException, Depends, status, UploadFile, File,
 from typing import List, Optional
 import shutil
 import os
+import json
 from .manager import WorkerManager, WorkerCreate, WorkerUpdate, WorkerLogin, WorkerResponse
 import logging
 
@@ -17,16 +18,18 @@ async def register_worker(worker_data: WorkerCreate):
         if "error" in result:
             raise HTTPException(status_code=400, detail=result["error"])
         
-        # Add token and format for frontend
-        if "worker" in result:
-            result["worker"]["token"] = f"worker-token-{result['worker']['id']}"
-            return {
-                "data": result["worker"],  # ✅ Frontend expects response.data
-                "success": True,
-                "message": result.get("message", "Worker registered successfully")
-            }
+        # Get the worker data
+        worker = result["worker"]
         
-        return result
+        # Add token to worker data (NOT in a nested "data" field)
+        worker["token"] = f"worker-token-{worker['id']}"
+        
+        # Return worker data directly (not nested inside "data")
+        return {
+            **worker,  # Spread worker data at root level
+            "success": True,
+            "message": result.get("message", "Worker registered successfully")
+        }
     except Exception as e:
         logger.error(f"Registration error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -39,18 +42,19 @@ async def login_worker(login_data: WorkerLogin):
         if not worker:
             raise HTTPException(status_code=401, detail="Invalid credentials")
         
-        # Add token for frontend
+        # Add token directly to worker object
         worker['token'] = f"worker-token-{worker['id']}"
         
-        # Match frontend expectation
+        # Return worker data at root level with success flags
         return {
-            "data": worker,  # ✅ Frontend expects response.data
+            **worker,
             "success": True,
             "message": "Login successful"
         }
     except Exception as e:
         logger.error(f"Login error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
 @router.get("/", response_model=List[WorkerResponse])
 async def get_all_workers(
     available_only: bool = True,
@@ -105,7 +109,16 @@ async def update_worker(worker_id: int, update_data: WorkerUpdate):
         result = worker_manager.update_worker(worker_id, update_data)
         if "error" in result:
             raise HTTPException(status_code=404, detail=result["error"])
-        return result
+        
+        # Get the updated worker data
+        worker = result.get("worker", {})
+        
+        # Return worker data at root level with success flags
+        return {
+            **worker,
+            "success": True,
+            "message": result.get("message", "Worker updated successfully")
+        }
     except Exception as e:
         logger.error(f"Update worker error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -139,7 +152,7 @@ async def add_job_completed(
     job_type: str,
     client_id: int,
     earnings: float,
-    rating: int = None
+    rating: Optional[int] = None
 ):
     """Record a completed job for a worker"""
     try:
@@ -181,6 +194,9 @@ async def upload_resume(
         update_data = WorkerUpdate(resume_url=f"/{file_location}")
         result = worker_manager.update_worker(worker_id, update_data)
         
+        if "error" in result:
+            raise HTTPException(status_code=400, detail=result["error"])
+        
         # Add to documents table
         conn = worker_manager.get_connection()
         cur = conn.cursor()
@@ -216,7 +232,8 @@ async def complete_onboarding(
             employee_details=onboarding_data.get('employee_details'),
             tax_status=onboarding_data.get('tax_status', 'standard'),
             id_verified=onboarding_data.get('id_verified', False),
-            background_check_passed=onboarding_data.get('background_check_passed', False)
+            background_check_passed=onboarding_data.get('background_check_passed', False),
+            verification_status="verified" if onboarding_data.get('id_verified', False) else "pending"
         )
         
         result = worker_manager.update_worker(worker_id, update_data)
@@ -224,10 +241,14 @@ async def complete_onboarding(
         if "error" in result:
             raise HTTPException(status_code=400, detail=result["error"])
         
+        # Get updated worker
+        updated_worker = result.get("worker", {})
+        
+        # Return worker data at root level
         return {
+            **updated_worker,
             "success": True,
-            "message": "Onboarding completed successfully",
-            "worker": result.get("worker")
+            "message": "Onboarding completed successfully"
         }
     except Exception as e:
         logger.error(f"Onboarding error: {e}")
@@ -299,7 +320,7 @@ async def get_worker_stats(worker_id: int):
             WHERE worker_id = ?
         ''', (worker_id,))
         
-        job_stats = dict(cur.fetchone() or {})
+        job_stats = cur.fetchone()
         
         # Get rating stats
         cur.execute('''
@@ -310,20 +331,20 @@ async def get_worker_stats(worker_id: int):
             WHERE worker_id = ? AND rating IS NOT NULL
         ''', (worker_id,))
         
-        rating_stats = dict(cur.fetchone() or {})
+        rating_stats = cur.fetchone()
         
         conn.close()
         
         return {
             "job_stats": {
-                "completed_jobs": job_stats.get('completed_jobs', 0) or 0,
-                "pending_jobs": job_stats.get('pending_jobs', 0) or 0,
-                "active_jobs": job_stats.get('active_jobs', 0) or 0,
-                "total_earnings": job_stats.get('total_earnings', 0) or 0
+                "completed_jobs": job_stats[0] if job_stats and job_stats[0] else 0,
+                "pending_jobs": job_stats[1] if job_stats and job_stats[1] else 0,
+                "active_jobs": job_stats[2] if job_stats and job_stats[2] else 0,
+                "total_earnings": float(job_stats[3]) if job_stats and job_stats[3] else 0.0
             },
             "rating_stats": {
-                "avg_rating": round(rating_stats.get('avg_rating', 0) or 0, 1),
-                "total_ratings": rating_stats.get('total_ratings', 0) or 0
+                "avg_rating": round(float(rating_stats[0] or 0), 1) if rating_stats else 0.0,
+                "total_ratings": rating_stats[1] if rating_stats and rating_stats[1] else 0
             },
             "verification": {
                 "background_check_passed": worker.get('background_check_passed', False),
@@ -358,8 +379,11 @@ async def get_worker_notifications(worker_id: int, unread_only: bool = False):
         notifications = []
         for row in cur.fetchall():
             notification = dict(row)
-            if notification['data_json']:
-                notification['data'] = json.loads(notification['data_json'])
+            if notification.get('data_json'):
+                try:
+                    notification['data'] = json.loads(notification['data_json'])
+                except:
+                    notification['data'] = {}
                 del notification['data_json']
             notifications.append(notification)
         
@@ -434,7 +458,7 @@ async def get_worker_dashboard(worker_id: int):
         notifications = await get_worker_notifications(worker_id, unread_only=True)
         
         return {
-            "worker": worker,
+            **worker,
             "stats": stats_response,
             "recent_jobs": recent_jobs,
             "unread_notifications": len(notifications),
@@ -443,7 +467,9 @@ async def get_worker_dashboard(worker_id: int):
                 "acceptance_rate": worker.get('acceptance_rate', 88),
                 "avg_response_time": worker.get('avg_response_time', '15 min'),
                 "reliability_score": worker.get('reliability_score', 4.8)
-            }
+            },
+            "success": True,
+            "message": "Dashboard data retrieved successfully"
         }
     except Exception as e:
         logger.error(f"Get dashboard error: {e}")
