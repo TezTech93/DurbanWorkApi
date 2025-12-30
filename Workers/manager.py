@@ -149,7 +149,6 @@ class WorkerManager:
                     profile_image TEXT,
                     id_number TEXT,
                     
-                    # Add onboarding fields
                     onboarding_completed BOOLEAN DEFAULT FALSE,
                     payment_type TEXT DEFAULT 'contractor',
                     business_info_json TEXT,
@@ -160,13 +159,10 @@ class WorkerManager:
                     background_check_passed BOOLEAN DEFAULT FALSE,
                     verification_status TEXT DEFAULT 'pending',
                     
-                    # Add stats fields
                     response_rate REAL DEFAULT 95.0,
                     acceptance_rate REAL DEFAULT 88.0,
                     avg_response_time TEXT DEFAULT '15 min',
                     reliability_score REAL DEFAULT 4.8,
-                    
-                    # Add resume field
                     resume_url TEXT,
                     
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
